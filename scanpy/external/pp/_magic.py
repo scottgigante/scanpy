@@ -30,6 +30,13 @@ def magic(
     MAGIC is an algorithm for denoising and transcript recover of single cells
     applied to single-cell sequencing data. MAGIC builds a graph from the data
     and uses diffusion to smooth out noise and recover the data manifold.
+    
+    The algorithm implemented here has changed primarily in two ways
+    compared to the algorithm described in [vanDijk18]_. Firstly, we use
+    the adaptive kernel described in Moon et al, 2019 [Moon17]_ for
+    improved stability. Secondly, data diffusion is applied
+    in the PCA space, rather than the data space, for speed and
+    memory improvements.
 
     More information and bug reports
     `here <https://github.com/KrishnaswamyLab/MAGIC>`__. For help, visit
@@ -43,9 +50,9 @@ def magic(
         Denoised genes to return. The default `'all_genes'`/`None`
         may require a large amount of memory if the input data is sparse.
         Another possibility is `'pca_only'`.
-    k
+    knn
         number of nearest neighbors on which to build kernel
-    a
+    decay
         sets decay rate of kernel tails.
         If None, alpha decaying kernel is not used
     t
@@ -97,23 +104,30 @@ def magic(
     >>> adata_magic = sce.pp.magic(adata, name_list=['Mpo', 'Klf1', 'Ifitm1'], k=5)
     >>> adata_magic.shape
     (2730, 3)
-    >>> sce.pp.magic(adata, name_list='pca_only', k=5)
+    >>> sce.pp.magic(adata, name_list='pca_only', knn=5)
     >>> adata.obsm['X_magic'].shape
     (2730, 100)
-    >>> sce.pp.magic(adata, name_list='all_genes', k=5)
+    >>> sce.pp.magic(adata, name_list='all_genes', knn=5)
     >>> adata.X.shape
     (2730, 3451)
     """
 
     try:
-        from magic import MAGIC
+        from magic import MAGIC, __version__
     except ImportError:
         raise ImportError(
             'Please install magic package via `pip install --user '
-            'git+git://github.com/KrishnaswamyLab/MAGIC.git#subdirectory=python`'
+            'magic-impute`'
         )
+    else:
+        __version__ = tuple([int(v) for v in __version__.split(".")[:2])
+        if not __version__ >= (1, 5):
+            raise ImportError(
+                'Please update magic package via `pip install --user '
+                '--upgrade magic-impute`'
+            )
 
-    start = logg.info('computing PHATE')
+    start = logg.info('computing MAGIC')
     all_or_pca = isinstance(name_list, (str, type(None)))
     if all_or_pca and name_list not in {"all_genes", "pca_only", None}:
         raise ValueError(
@@ -132,8 +146,8 @@ def magic(
     n_jobs = settings.n_jobs if n_jobs is None else n_jobs
 
     X_magic = MAGIC(
-        k=k,
-        a=a,
+        knn=knn,
+        decay=decay,
         t=t,
         n_pca=n_pca,
         knn_dist=knn_dist,
